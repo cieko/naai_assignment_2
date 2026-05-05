@@ -2,7 +2,7 @@
 
 const PRICE_PER_LITER = 50;
 
-function warmOrderStuff(): void
+function initial(): void
 {
     if (!isset($_SESSION['orders'])) {
         $_SESSION['orders'] = [];

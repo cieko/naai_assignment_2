@@ -3,7 +3,7 @@
 require_once __DIR__ . '/functions.php';
 
 session_start();
-warmOrderStuff();
+initial();
 
 $curdTypes = curdListPick();
 $errors = [];
