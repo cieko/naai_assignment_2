@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/db.php';
 
 session_start();
 initial();
@@ -8,18 +9,10 @@ initial();
 $curdTypes = curdListPick();
 $errors = [];
 $formData = blankDataBag();
-$requestMethod = 'GET';
-
-if (isset($_SERVER['REQUEST_METHOD'])) {
-    $requestMethod = $_SERVER['REQUEST_METHOD'];
-}
+$requestMethod = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($requestMethod === 'POST') {
-    $action = '';
-
-    if (isset($_POST['action'])) {
-        $action = $_POST['action'];
-    }
+    $action = $_POST['action'] ?? '';
 
     if ($action === 'save_order') {
         $formData = postBitsNow($_POST);
@@ -28,35 +21,51 @@ if ($requestMethod === 'POST') {
         if (empty($errors)) {
             $quantity = (float) $formData['quantity'];
             $totalPrice = sumAmtNow($quantity);
-            $orderData = [
-                'id' => $formData['order_id'] !== '' ? (int) $formData['order_id'] : $_SESSION['next_order_id'],
-                'customer_name' => $formData['customer_name'],
-                'mobile_number' => $formData['mobile_number'],
-                'quantity' => $quantity,
-                'curd_type' => $formData['curd_type'],
-                'delivery_date' => $formData['delivery_date'],
-                'total_price' => $totalPrice,
-            ];
 
             if ($formData['order_id'] !== '') {
-                $didUpdate = false;
 
-                foreach ($_SESSION['orders'] as $index => $order) {
-                    if ((int) $order['id'] === (int) $formData['order_id']) {
-                        $_SESSION['orders'][$index] = $orderData;
-                        $didUpdate = true;
-                        break;
-                    }
-                }
+                $stmt = $conn->prepare("UPDATE orders SET 
+                    customer_name=?, 
+                    mobile_number=?, 
+                    quantity=?, 
+                    curd_type=?, 
+                    delivery_date=?, 
+                    total_price=? 
+                    WHERE id=?");
 
-                if ($didUpdate) {
-                    saveFlashPop('Order updated successfully.', 'success', 'Order Updated');
-                } else {
-                    saveFlashPop('Order updated successfully.', 'success', 'Order Updated');
-                }
+                $stmt->bind_param(
+                    "ssdssdi",
+                    $formData['customer_name'],
+                    $formData['mobile_number'],
+                    $quantity,
+                    $formData['curd_type'],
+                    $formData['delivery_date'],
+                    $totalPrice,
+                    $formData['order_id']
+                );
+
+                $stmt->execute();
+
+                saveFlashPop('Order updated successfully.', 'success', 'Order Updated');
+
             } else {
-                $_SESSION['orders'][] = $orderData;
-                $_SESSION['next_order_id']++;
+
+                $stmt = $conn->prepare("INSERT INTO orders 
+                    (customer_name, mobile_number, quantity, curd_type, delivery_date, total_price) 
+                    VALUES (?, ?, ?, ?, ?, ?)");
+
+                $stmt->bind_param(
+                    "ssdssd",
+                    $formData['customer_name'],
+                    $formData['mobile_number'],
+                    $quantity,
+                    $formData['curd_type'],
+                    $formData['delivery_date'],
+                    $totalPrice
+                );
+
+                $stmt->execute();
+
                 saveFlashPop('Order added successfully.', 'success', 'Order Added');
             }
 
@@ -66,31 +75,28 @@ if ($requestMethod === 'POST') {
 
     if ($action === 'delete_order') {
         $orderId = (int) ($_POST['order_id'] ?? 0);
-        $deletedSomething = false;
 
-        foreach ($_SESSION['orders'] as $index => $order) {
-            if ((int) $order['id'] === $orderId) {
-                unset($_SESSION['orders'][$index]);
-                $_SESSION['orders'] = array_values($_SESSION['orders']);
-                $deletedSomething = true;
-                break;
-            }
-        }
+        $stmt = $conn->prepare("DELETE FROM orders WHERE id=?");
+        $stmt->bind_param("i", $orderId);
+        $stmt->execute();
 
-        if ($deletedSomething) {
-            saveFlashPop('Order deleted successfully.', 'success', 'Order Deleted');
-        }
+        saveFlashPop('Order deleted successfully.', 'success', 'Order Deleted');
 
         goHomeFastish();
     }
 }
 
-// populate the date, when edit
 if (isset($_GET['edit'])) {
     $editId = (int) $_GET['edit'];
-    $order = matchOrderOne($_SESSION['orders'], $editId);
 
-    if ($order !== null) {
+    $stmt = $conn->prepare("SELECT * FROM orders WHERE id=?");
+    $stmt->bind_param("i", $editId);
+    $stmt->execute();
+
+    $result = $stmt->get_result();
+    $order = $result->fetch_assoc();
+
+    if ($order) {
         $formData = [
             'order_id' => (string) $order['id'],
             'customer_name' => $order['customer_name'],
@@ -103,12 +109,24 @@ if (isset($_GET['edit'])) {
 }
 
 $flash = pullFlashOne();
-$orders = $_SESSION['orders'];
+
+$result = $conn->query("SELECT * FROM orders ORDER BY id DESC");
+
+$orders = [];
+if ($result && $result->num_rows > 0) {
+    $orders = $result->fetch_all(MYSQLI_ASSOC);
+}
+
 $isEditing = $formData['order_id'] !== '';
 $deleteOrder = null;
 
 if (isset($_GET['delete'])) {
-    $deleteOrder = matchOrderOne($orders, (int) $_GET['delete']);
+    foreach ($orders as $order) {
+        if ((int)$order['id'] === (int)$_GET['delete']) {
+            $deleteOrder = $order;
+            break;
+        }
+    }
 }
 
 $showAddModal = isset($_GET['open']) && $_GET['open'] === 'add';
